@@ -1,10 +1,13 @@
 {
   "name": "omnitech-dev-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Companion to crux: bounded execution packets, independent verifier receipts, cost-guarded runs across harnesses, and a cross-project forge log in crux's locked format.",
   "homepage": "https://github.com/omnitech-solutions/omnitech-dev-kit",
-  "requires": { "crux": ">=3.11.1" },
+  "requires": {
+    "crux": ">=3.11.1"
+  },
   "skills": [
+    "skills/kit-init-campaign/SKILL.md",
     "skills/kit-run-unit/SKILL.md",
     "skills/kit-write-packet/SKILL.md",
     "skills/kit-verify-receipt/SKILL.md",
@@ -16,6 +19,7 @@
     "scripts/run.py",
     "scripts/validate.py",
     "scripts/check_crux_compat.py",
-    "scripts/sync_skills.py"
+    "scripts/sync_skills.py",
+    "scripts/init_project.py"
   ]
 }

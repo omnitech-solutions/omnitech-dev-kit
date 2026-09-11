@@ -1,14 +1,14 @@
 ---
-name: kit-run-unit
-description: "Use when the user says \"run unit <id> as <role>\", \"start the reader/orchestrator/implementer/verifier\", or wants one cost-guarded model run through omp, Claude Code, Codex or OpenCode. Wraps scripts/run.py: role tool allow-list, wall-clock cap, no session, stdin from /dev/null, per-run and per-campaign dollar guards, one spend row. Never loops; one human command, one run."
+name: kit-init-campaign
+description: "Use when the user says \"start orchestration for <feature>\", \"set up the kit on <repo>\", \"init a campaign\", or wants to begin packet/receipt work on a new feature or project. Runs scripts/init_project.py to scaffold the campaign folder (OBJECTIVE, AGENTS-<feature>, ledger, kit.config, RUNBOOK for the chosen harness, fixtures/evidence/packets/receipts/runs, spend) and walks the human checklist in docs/INIT.md. Edits no product code."
 metadata:
-  tags: "runner, cost-guard, harness"
+  tags: "bootstrap, campaign, init"
   bundles: "omnitech-dev-kit"
-  risk_level: "medium"
+  risk_level: "low"
   companion_to: "crux"
 ---
 
-# kit-run-unit
+# kit-init-campaign
 
 <!-- BEGIN GENERATED: runtime-compat -->
 ## Runtime compatibility
@@ -23,11 +23,11 @@ This skill is portable across Claude Code, Codex, and OpenCode. This section ove
 <!-- END GENERATED: runtime-compat -->
 
 ## Procedure
-1. Confirm `kit.config.json` exists in the project's kit folder (copy `kit.config.example.json`; set `campaign_baseline_usd` to the current key usage before the first run). The key is read from the env var named by `key_env`; never read it from dotfiles or print it.
-2. Build the prompt as `@` file references: the AGENTS file, the role promptbook from `${KIT_PLUGIN_ROOT}/promptbooks/`, the packet or fixtures, then one line of instruction naming the receipt path.
-3. Run: `python3 ${KIT_PLUGIN_ROOT}/scripts/run.py <role> <unit> <cwd> [--harness omp|claude|codex|opencode] [--out FILE --validate evidence|packet|receipt] -- @... "instruction"`. Model and thinking come from `kit.config.json` per role; pass `--model`/`--thinking` only to override for one run. Use `--dry-run` first on a new campaign or harness.
-4. Read the one-line result. Exit 3 or 4 means a guard fired, exit 5 means the artefact failed shape validation, exit 124 means the wall clock killed it: stop and report; never re-run the same prompt unchanged.
-5. Implementer runs happen in a git worktree the human created (`git worktree add -b <unit> ../wt-<unit> <branch>`); the verifier runs in the same worktree afterwards.
+1. Ask for, or take from the user's phrase: repo path, feature slug (kebab-case), harness (omp|claude|codex|opencode), one-line oracle. Read the current key usage if the probe is OpenRouter (never print the key).
+2. Run `python3 ${KIT_PLUGIN_ROOT}/scripts/init_project.py <repo> <campaign-dir> --feature <slug> --harness <h> --oracle "<line>" --baseline-usd <usage>`. Never pass `--force` unless the user asked to overwrite.
+3. Open `docs/INIT.md` §3 with the user and fill `AGENTS-<feature>.md`: owned dirs, protected inputs, invariants, gates table with baseline counts from a real run **today**, one live-boundary gate.
+4. Capture the first fixture pair together (human does the capturing; you write the ledger row). `validate.py ledger` must pass.
+5. `run.py <role> … --dry-run` once; hand the RUNBOOK to the user. The first paid run is the human's command, not yours.
 
 ## Never
-Start a run inside a loop or scheduler. Raise a cap to make a run pass. Run an implementer against the main checkout.
+Write fixtures from memory or from the oracle directly. Invent baseline counts. Start a paid run from inside this skill.

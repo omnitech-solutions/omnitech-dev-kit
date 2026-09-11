@@ -25,7 +25,7 @@ This skill is portable across Claude Code, Codex, and OpenCode. This section ove
 ## Procedure
 1. Read the project AGENTS file (from `promptbooks/AGENTS.template.md`), the ledger row, both fixtures, and `evidence/<row>.md` if present. If the evidence note is missing and the row needs code facts, stop and request a reader run first (`kit-run-unit`, role `reader`).
 2. Follow `${KIT_PLUGIN_ROOT}/promptbooks/orchestrate.md` exactly; the output is the packet body only.
-3. Save to the project's `packets/<unit>.md` and run `python3 ${KIT_PLUGIN_ROOT}/scripts/validate.py packet packets/<unit>.md --repo .`. A packet that fails validation is not a packet.
+3. Save to the project's `packets/<unit>.md` and run `python3 ${KIT_PLUGIN_ROOT}/scripts/validate.py packet packets/<unit>.md --repo .` (or let `run.py --out … --validate packet` do it). A packet that fails validation is not a packet. If the orchestrator model times out once and the evidence note already carries the design, write the packet by hand; do not re-run.
 4. Hand the packet to the human. Status stays DRAFT until a human edits or approves it; never start an implementer on a DRAFT.
 
 ## Red flags
