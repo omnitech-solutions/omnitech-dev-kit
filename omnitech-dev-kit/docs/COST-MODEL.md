@@ -45,6 +45,26 @@ Example: 8 rows → 8 × 0.10 × 1.5 = $1.20 → cap $2.00, run cap $0.25 (what 
 A campaign that approaches its cap is not a reason to raise the cap; it is a reason to read `spend.jsonl`
 (`validate.py spend`) and find the timeouts.
 
+## Same question, four harnesses (trial, 2026-09-10)
+
+One reader question about three files (571 lines), identical prompt, `z-ai/glm-5.3-flash` everywhere it was
+reachable. Total for the whole trial: **$0.05**.
+
+| harness | model | wall | cost | artefact | note |
+| --- | --- | --- | --- | --- | --- |
+| omp | glm-5.3-flash | 88 s | $0.0041 | valid | the reference path |
+| opencode | glm-5.3-flash | 93 s | $0.0074 | valid | ~1.8× omp for the same answer |
+| codex | glm-5.3-flash | 119 s | $0.0385 | valid | **9× omp**: no tool allow-list, so it shelled out and dumped whole files repeatedly |
+| claude | haiku-4.5 | 1 s | $0 | none | CLI not logged in; failed closed in one second |
+| opencode | local 30B (LM Studio) | 210 s | $0 | none | looped, killed by the wall clock |
+| opencode | local 20B (LM Studio) | 390 s | $0 | none | looped, killed by the wall clock |
+
+Two lessons. **The harness, not the model, drove a 9× cost difference on identical work**: a harness that
+cannot restrict tools lets a model choose an expensive way to read. And **free is not cheap**: the two local
+runs cost no money and consumed ten minutes of wall clock for nothing, because a prompt that outgrows a
+small context window gets truncated, and the instructions are what disappears. Budget local models by their
+context window first and their price second.
+
 ## What scales the cost and what does not
 - Cost scales with **number of runs**, not with feature size: bigger features mean more rows, not bigger rows.
   A row that needs more than one packet is two rows.

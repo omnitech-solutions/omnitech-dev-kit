@@ -38,7 +38,13 @@ def main(a):
     floor = kit.get("requires", {}).get("crux", ">=0").lstrip(">=")
     if vtuple(crux["version"]) < vtuple(floor): errs.append(f"crux {crux['version']} < required {floor}")
     crux_ids = {x["id"] for x in json.loads((root / "catalog" / "skills.json").read_text())}
+    # Every skill this kit DISTRIBUTES must be checked for collisions, not only the ones the manifest
+    # lists: sync_skills.py also installs skills/borrowed/*, and a borrowed name can collide with crux.
     kit_ids = {Path(s).parent.name for s in kit["skills"]}
+    borrowed_ids = {d.name for d in (KIT / "skills" / "borrowed").iterdir()
+                    if d.is_dir() and (d / "SKILL.md").is_file()} if (KIT / "skills" / "borrowed").is_dir() else set()
+    for c in sorted(borrowed_ids & crux_ids):
+        errs.append(f"borrowed skill id collides with crux (sync_skills installs it): {c}")
     for c in sorted(kit_ids & crux_ids): errs.append(f"skill id collision with crux: {c}")
     for k in sorted(kit_ids):
         if not k.startswith("kit-"): errs.append(f"kit skill not namespaced: {k}")
@@ -53,6 +59,11 @@ def main(a):
             for s in kit["skills"]:
                 st = (KIT / s).read_text()
                 if block not in st: errs.append(f"runtime-compat block drifted from crux in {s}")
+        else:
+            # Absence of the upstream contract material is an incompatibility, not permission to skip the
+            # check: the kit copies this block verbatim and cannot claim it still matches.
+            errs.append("crux forge-skill no longer carries a runtime-compat block; the kit copies it "
+                        "verbatim and can no longer verify that claim")
     else:
         errs.append("crux forge-skill/SKILL.md missing")
     for e in errs: print(f"INCOMPATIBLE: {e}", file=sys.stderr)

@@ -34,7 +34,9 @@ mirrors `omnitech-dev-kit/skills/**` into that directory and prints a receipt.
 2. `docs/HARNESSES.md` — the omp / claude / codex / opencode matrix: what each can and cannot express.
 3. `docs/COST-MODEL.md` — what a unit costs, where the waste is, how to budget a campaign.
 4. `docs/SCALING.md` — growing across units, features, projects, harnesses and people without breaking the five invariants.
-5. `lessons/` — one dated file per rule that cost real money once.
+5. `docs/HARDENING.md` — what the control layer refuses, the exit-code table, and what it still cannot promise.
+6. `docs/ROADMAP.md` — the structural pieces not yet built: unit lifecycle, trusted gate runner, composable policy, crux bridge.
+7. `lessons/` — one dated file per rule that cost real money once.
 
 ## What to say
 

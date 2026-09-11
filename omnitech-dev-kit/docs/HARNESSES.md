@@ -17,13 +17,41 @@ stated here, not hidden.
 | `@file` prompt parts | native | inlined by `_prompt.sh` | inlined by `_prompt.sh` | passed as `--file` |
 | Final answer → `--out` | stdout stream | `result` of `--output-format json` | `-o <file>` | stdout stream |
 | Cost source | OpenRouter key usage (`usage_probe: openrouter`) | `total_cost_usd` from the JSON result (`usage_probe: harness`) | OpenRouter key usage when routed through OpenRouter; else none | OpenRouter key usage when the model is `openrouter/…`; else none |
-| Verified live | yes (pilot, 10 units) | dry-run only | dry-run only | dry-run only |
+| Verified live | yes (pilot, 10 units + trial) | adapter exercised; CLI not logged in on the trial machine | yes (trial, reader) | yes (trial, reader) |
+
+## What each harness can actually ENFORCE
+
+This is the capability contract `run.py` checks before every run (`HARNESS_CAPS`). "Can enforce" means the
+harness makes the thing impossible, not that it can be asked not to do it.
+
+| capability | omp | claude | codex | opencode |
+| --- | --- | --- | --- | --- |
+| make shell unavailable to a role | yes | yes (`--tools`) | **no** | yes (agent file) |
+| make the workspace unwritable | yes | yes | yes (`--sandbox read-only`) | yes (agent file) |
+| run without persisting a session | yes | yes | yes (`--ephemeral`) | **no** |
+
+A role that needs a capability its harness lacks is refused (exit 7) unless the gap is recorded in
+`kit.config.json` under `allow_capability_gap.<harness>`. Session persistence warns instead of refusing.
+
+**Codex, verified live on 2026-09-10:** a reader role declared `tools: read,grep,glob` and Codex executed
+`/bin/zsh -lc 'cat -n ...'` to read the files. The read-only sandbox stopped writes and network, so nothing
+escaped scope, but the no-shell half of the role contract was not applied. The repeated full-file dumps
+also made that run cost nine times the same question on omp. Codex is a good fit for roles that legitimately
+use shell (implementer, verifier) and a poor fit for a shell-free reader.
+
+**Claude:** `--tools` restricts the available built-in set and is the boundary; `--allowedTools` only waives
+the permission prompt. The adapter passes both. An earlier version passed only `--allowedTools`, which does
+not restrict anything.
 
 ## Boundaries the adapters refuse to cross
 - `codex.sh` never emits `danger-full-access`. `claude.sh` emits `bypassPermissions` only for `approval: yolo`,
   which the config gives only to roles that run inside a worktree.
 - No adapter reads a key from a dotfile. The key is whatever env var `key_env` names, exported by the human.
-- Guards (`exit 3` per-run, `exit 4` per-campaign, `exit 5` artefact invalid) are stops. Nothing retries.
+  Codex's provider is defined with inline `-c` flags and the key is passed **by name only**, so the kit never
+  writes to `~/.codex/config.toml` and never puts a secret on disk.
+- The OpenCode adapter refuses to run (exit 78) when the role agent file is missing, rather than falling back
+  to the unrestricted default agent.
+- Every exit code is a stop, never a retry signal. The full table is in `HARDENING.md`.
 
 ## Setting each harness up once
 - **omp**: `omp` on PATH, provider keys in omp's own auth. Skills: `python3 scripts/sync_skills.py` mirrors kit skills into `~/.omp/agent/skills/`.

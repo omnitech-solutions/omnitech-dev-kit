@@ -14,7 +14,9 @@ from pathlib import Path
 
 SECTIONS = ["## 1. Protected inputs", "## 2. Owned files", "## 3. Todo DAG", "## 4. Structural evidence",
             "## 5. Real-boundary test", "## 6. Definition of done", "## 7. Checkpoint", "## 8. Out of scope"]
-GATE = re.compile(r"^gate: .+ \(.+\) (→|->) exit \d+ (—|-) .+$")  # ASCII arrow/dash accepted; models vary
+GATE = re.compile(r"^gate: .+ \(.+\) (→|->) exit (?P<code>\d+)(?: \((?P<verdict>PASS|FAIL)\))? (—|-) .+$")
+# ASCII arrow/dash accepted (models vary); the optional "(PASS)"/"(FAIL)" suffix is what record_gate.py
+# emits, so a truthful failing gate stays representable instead of failing shape validation.
 FORGE_HDR = re.compile(r"^## \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] (authored|revised|used|evaluated|fallback|escalated|pruned) \| [a-z0-9][a-z0-9-]*$")
 EVAL1 = re.compile(r"^- verdict: (effective|fell-short|mixed) \| gap: (closed|partial|not-closed) \| recommend: (keep|revise|prune)$")
 SPEND_KEYS = {"ts", "role", "unit", "seconds", "exit", "cost_usd", "cumulative_usd", "log"}
@@ -28,6 +30,14 @@ def packet(path, repo):
         if idx is None: errs.append(f"missing section {s!r}")
         elif idx < pos: errs.append(f"section out of order {s!r}")
         else: pos = idx
+    idxs = [next((i for i, l in enumerate(text) if l.startswith(sec)), None) for sec in SECTIONS]
+    for n, (sec, i) in enumerate(zip(SECTIONS, idxs)):
+        if i is None: continue
+        nxt = next((j for j in idxs[n + 1:] if j is not None), len(text))
+        body = [l for l in text[i + 1:nxt] if l.strip() and not l.strip().startswith("<!--")]
+        if not body: errs.append(f"section {sec!r} is empty")
+        elif all(re.fullmatch(r"[-*]?\s*<[^>]*>\s*", l.strip()) for l in body):
+            errs.append(f"section {sec!r} still holds only template placeholders")
     if repo:
         i2 = next((i for i, l in enumerate(text) if l.startswith(SECTIONS[1])), None)
         i3 = next((i for i, l in enumerate(text) if l.startswith(SECTIONS[2])), len(text))
@@ -41,10 +51,23 @@ def packet(path, repo):
     return errs
 
 def receipt(path):
+    """Shape AND internal consistency. A REJECT carrying a failed gate is a valid document; an ACCEPT
+    carrying one is not, and neither is a receipt that states both verdicts. Validity still means only
+    'this document is well formed and does not contradict itself' — never 'this work is accepted'."""
     text = Path(path).read_text().splitlines(); errs = []
     lead = [l.strip() for l in text if l.strip()][:3]  # a title line may precede the verdict
-    if not any(l in ("VERDICT: ACCEPT", "VERDICT: REJECT") for l in lead): errs.append("'VERDICT: ACCEPT' or 'VERDICT: REJECT' must be one of the first three non-empty lines")
-    if not any(GATE.match(l.strip("- ").strip()) for l in text): errs.append("no gate line in the form 'gate: <cmd> (<dir>) → exit N — <token>'")
+    verdicts = {l.strip() for l in text if l.strip() in ("VERDICT: ACCEPT", "VERDICT: REJECT")}
+    if not any(l in ("VERDICT: ACCEPT", "VERDICT: REJECT") for l in lead):
+        errs.append("'VERDICT: ACCEPT' or 'VERDICT: REJECT' must be one of the first three non-empty lines")
+    if len(verdicts) > 1:
+        errs.append("contradictory verdicts: the receipt states both ACCEPT and REJECT")
+    gates = [GATE.match(l.strip("- ").strip()) for l in text]
+    gates = [g for g in gates if g]
+    if not gates:
+        errs.append("no gate line in the form 'gate: <cmd> (<dir>) → exit N — <token>'")
+    failed = [g.group(0) for g in gates if g.group("code") != "0" or g.group("verdict") == "FAIL"]
+    if failed and "VERDICT: ACCEPT" in verdicts:
+        errs.append(f"ACCEPT contradicted by {len(failed)} failed gate line(s), first: {failed[0][:70]!r}")
     if len(text) > 80: errs.append(f"{len(text)} lines > 80")
     return errs
 
@@ -63,6 +86,8 @@ def forge_log(path):
 EVIDENCE_HEADS = ["## Question", "## Facts", "## Structural queries", "## Smallest owned-file set", "## Nearest existing test", "## Unknowns"]
 CITE = re.compile(r"[\w./-]+\.[a-zA-Z]{1,5}:\d+")
 LEDGER_COLS = ["id", "behaviour", "oracle fixture", "subject fixture", "verdict", "unit", "gate"]
+# NOT-REPRODUCED is a real outcome: a row investigated and closed without code (the pilot had one).
+LEDGER_VERDICTS = ("PASS", "FAIL", "PARTIAL", "UNCAPTURED", "NOT REPRODUCED", "NOT-REPRODUCED")
 
 def evidence(path):
     text = Path(path).read_text().splitlines(); errs = []
@@ -80,8 +105,14 @@ def ledger(path, repo):
     for c in [x for x in LEDGER_COLS if "fixture" not in x]:
         if c not in cols: errs.append(f"header lacks column {c!r}")
     if sum("fixture" in c for c in cols) < 2: errs.append("header needs two fixture columns (oracle and subject, any naming)")
+    vcol = cols.index("verdict") if "verdict" in cols else None
     for n, l in enumerate(text, 1):
         if l.startswith("| ") and not l.startswith("| id |") and not l.startswith("| ---"):
+            cells = [c.strip() for c in l.strip("|").split("|")]
+            if vcol is not None and vcol < len(cells):
+                v = cells[vcol]
+                if v and not any(v.startswith(x) for x in LEDGER_VERDICTS):
+                    errs.append(f"line {n}: verdict {v[:24]!r} is not one of {LEDGER_VERDICTS}")
             for m in re.finditer(r"`([^`]+\.md)`", l):
                 if repo and not (Path(repo) / m.group(1)).exists() and "UNCAPTURED" not in l:
                     errs.append(f"line {n}: fixture path does not exist: {m.group(1)}")
@@ -100,6 +131,10 @@ def spend(path):
 def main(a):
     if len(a) < 2: print(__doc__, file=sys.stderr); sys.exit(2)
     kind, f = a[0], a[1]
+    if not Path(f).is_file():
+        # A killed or refused run leaves no artefact. That is INVALID, not a crash.
+        print(f"INVALID {kind} {f}: file does not exist (the run produced no artefact)", file=sys.stderr)
+        print(f"INVALID {kind} {f}"); sys.exit(1)
     repo = a[a.index("--repo") + 1] if "--repo" in a else None
     fn = {"packet": lambda: packet(f, repo), "receipt": lambda: receipt(f), "forge-log": lambda: forge_log(f), "spend": lambda: spend(f),
           "evidence": lambda: evidence(f), "ledger": lambda: ledger(f, repo)}.get(kind)

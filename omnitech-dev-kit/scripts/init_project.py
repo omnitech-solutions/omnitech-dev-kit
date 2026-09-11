@@ -38,8 +38,19 @@ def main(a):
     harness = opt("--harness", "omp"); force = "--force" in a
     oracle = opt("--oracle", "<the oracle: the system whose behaviour is the target>")
     baseline = opt("--baseline-usd")
-    models = {"reader": "openrouter/z-ai/glm-5.3-flash", "orchestrator": "openrouter/z-ai/glm-5.3",
-              "implementer": "openrouter/z-ai/glm-5.3-flash", "verifier": "openrouter/z-ai/glm-5.3-flash"}
+    DEFAULT_MODELS = {
+        "omp":      {"reader": "openrouter/z-ai/glm-5.3-flash", "orchestrator": "openrouter/z-ai/glm-5.3",
+                     "implementer": "openrouter/z-ai/glm-5.3-flash", "verifier": "openrouter/z-ai/glm-5.3-flash"},
+        "opencode": {"reader": "openrouter/z-ai/glm-5.3-flash", "orchestrator": "openrouter/z-ai/glm-5.3",
+                     "implementer": "openrouter/z-ai/glm-5.3-flash", "verifier": "openrouter/z-ai/glm-5.3-flash"},
+        # Codex addresses the provider separately (harness_env.codex), so model ids carry no provider prefix.
+        "codex":    {"reader": "z-ai/glm-5.3-flash", "orchestrator": "z-ai/glm-5.3",
+                     "implementer": "z-ai/glm-5.3-flash", "verifier": "z-ai/glm-5.3-flash"},
+        # Claude Code bills the Anthropic account and cannot reach OpenRouter models at all.
+        "claude":   {"reader": "claude-haiku-4-5-20251001", "orchestrator": "claude-sonnet-5",
+                     "implementer": "claude-sonnet-5", "verifier": "claude-haiku-4-5-20251001"},
+    }
+    models = dict(DEFAULT_MODELS.get(harness, DEFAULT_MODELS["omp"]))
     for kv in (opt("--models", "") or "").split(","):
         if "=" in kv: k, v = kv.split("=", 1); models[k.strip()] = v.strip()
     if not repo.is_dir(): die(f"repo {repo} not a directory")
@@ -47,9 +58,14 @@ def main(a):
     rel = camp.relative_to(repo) if camp.is_relative_to(repo) else camp
     made = []
 
-    cfg = json.loads((KIT.parent / "kit.config.example.json").read_text())
-    cfg.update({"harness": harness, "campaign": f"{repo.name}/{feature}", "campaign_baseline_usd": float(baseline) if baseline else None,
-                "models": models, "usage_probe": "harness" if harness == "claude" else "openrouter"})
+    # Look inside the plugin root first: an installed plugin does not carry files from above its own
+    # directory, so reading the parent's copy worked only in a source checkout.
+    example = next((c for c in (KIT / "kit.config.example.json", KIT.parent / "kit.config.example.json")
+                    if c.is_file()), None)
+    if example is None: die("kit.config.example.json not found in the plugin root or beside it")
+    cfg = json.loads(example.read_text())
+    cfg.update({"harness": harness, "campaign": f"{repo.name}/{feature}",
+                "campaign_baseline_usd": float(baseline) if baseline else None, "models": models})
     if write(camp / "kit.config.json", json.dumps(cfg, indent=2) + "\n", force): made.append("kit.config.json")
 
     agents = (KIT / "promptbooks" / "AGENTS.template.md").read_text().replace("<feature>", feature)
@@ -70,7 +86,7 @@ Out of scope for this campaign: <three things>.
 Oracle: {oracle}
 Subject: <url or path>
 
-Verdicts: PASS / FAIL / PARTIAL / UNCAPTURED. Gate: the human review state of the unit.
+Verdicts: PASS / FAIL / PARTIAL / UNCAPTURED / NOT REPRODUCED. Gate: the human review state of the unit.
 Row ids: `{feature.upper()[:3]}-NN`. One row = one observable behaviour = at most one unit.
 
 | id | behaviour | oracle fixture | subject fixture | verdict | unit | gate |
@@ -83,6 +99,7 @@ Cap for this campaign: <N> rows. Extend by owner request only.
     K = "$KIT_PLUGIN_ROOT"; B = "$B"; U = "$U"
     agents_ref = f"@{B}/AGENTS-{feature}.md"
     run = f"python3 {K}/scripts/run.py"
+    CFG = f"--config {B}/kit.config.json"
     runbook = f"""# RUNBOOK — {feature} ({harness})
 
 Generated {today} by init_project.py. One unit at a time. Every arrow is a human gate.
@@ -110,12 +127,12 @@ Commands. Tools, approval mode, wall clock, model and thinking come from `kit.co
 
 ```bash
 # 1 reader → evidence note (validated: six headings + at least one path:line)
-{run} reader {U} . --out {B}/evidence/{U}.md --validate evidence -- \\
+{run} reader {U} . {CFG} --out {B}/evidence/{U}.md --validate evidence -- \\
   {agents_ref} @{K}/promptbooks/read.md @{B}/fixtures/subject/{U}.md \\
   "Question: <one question, naming ≤5 files by path>"
 
 # 2 orchestrator → packet (validated: 8 sections, §2 paths exist). Status stays DRAFT until you edit it.
-{run} orchestrator {U} . --out {B}/packets/{U}.md --validate packet -- \\
+{run} orchestrator {U} . {CFG} --out {B}/packets/{U}.md --validate packet -- \\
   {agents_ref} @{K}/promptbooks/orchestrate.md @{K}/packets/TEMPLATE.md \\
   @{B}/fixtures/oracle/{U}.md @{B}/fixtures/subject/{U}.md @{B}/evidence/{U}.md "Write packet {U}."
 # If the orchestrator times out once and the evidence note already carries the design, write the packet by hand.
@@ -125,22 +142,27 @@ git worktree add -b unit/{U} ../wt-{U} $(git branch --show-current)
 # <project-specific: link or install dependencies inside the worktree; see AGENTS §gates>
 
 # 4 implementer → execution receipt (a claim). Pass ONLY worktree-relative paths.
-{run} implementer {U} ../wt-{U} -- \\
+{run} implementer {U} ../wt-{U} {CFG} -- \\
   {agents_ref} @{K}/promptbooks/implement.md @{B}/packets/{U}.md \\
   "Receipt path: {rel}/receipts/{U}-execution.md (relative to the worktree root). Run only the tests the packet names; leave the full bar to the verifier."
 
 # 5 verifier → receipt (validated: VERDICT first line + gate lines)
-{run} verifier {U} ../wt-{U} --out {B}/receipts/{U}-receipt.md --validate receipt -- \\
+{run} verifier {U} ../wt-{U} {CFG} --out {B}/receipts/{U}-receipt.md --validate receipt -- \\
   {agents_ref} @{K}/promptbooks/verify.md @{B}/packets/{U}.md @{B}/receipts/{U}-execution.md \\
   @{K}/skills/borrowed/verify-test-teeth/SKILL.md @{K}/skills/borrowed/local-diff-review/SKILL.md \\
   @{K}/skills/borrowed/commit-scope-guard/SKILL.md @{K}/skills/borrowed/record-gate-evidence/SKILL.md \\
   "Receipt path: {rel}/receipts/{U}-receipt.md. Re-run every gate yourself."
 
-# 6 human live gate, then apply: check `git status` in the MAIN checkout is clean first
-git -C ../wt-{U} diff > /tmp/{U}.patch && git apply --3way /tmp/{U}.patch && git worktree remove ../wt-{U}
+# 6 human live gate, then apply. Check the MAIN checkout is clean first; `git diff` alone would silently
+#   drop every NEW file (a new test is the usual casualty), so stage everything in the worktree first.
+git -C ../wt-{U} add -A
+git -C ../wt-{U} diff --binary --cached > /tmp/{U}.patch
+git -C ../wt-{U} diff --cached --stat          # read this: it is the exact candidate you are accepting
+git apply --3way --index /tmp/{U}.patch
+git worktree remove ../wt-{U}                   # fails if the worktree is dirty; resolve, do not force
 ```
 
-Before the first paid run: `{run} reader {U} . --dry-run -- {agents_ref} "x"` prints the resolved command.
+Before the first paid run: `{run} reader {U} . {CFG} --dry-run -- {agents_ref} "x"` prints the resolved command.
 
 Rules that are not optional (each one cost real money once; see `{K}/lessons/`):
 - A model ACCEPT is a claim. The human live-boundary gate in the AGENTS file is what closes a row.
