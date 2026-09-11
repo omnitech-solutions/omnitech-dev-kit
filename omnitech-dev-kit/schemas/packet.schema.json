@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "omnitech-dev-kit/packet",
+  "title": "Execution packet (markdown, section-checked)",
+  "description": "Packets are markdown; validate.py checks these required section headings and rules rather than a JSON body.",
+  "type": "object",
+  "required": ["unit", "title", "sections"],
+  "properties": {
+    "unit": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+[a-z]?(-R[0-9]+)?$" },
+    "title": { "type": "string", "minLength": 3 },
+    "sections": {
+      "type": "array",
+      "items": { "type": "string" },
+      "const": [
+        "1. Protected inputs", "2. Owned files", "3. Todo DAG", "4. Structural evidence required before claiming",
+        "5. Real-boundary test", "6. Definition of done", "7. Checkpoint / resume predicate", "8. Out of scope"
+      ]
+    },
+    "owned_files_exist": { "type": "boolean", "const": true },
+    "max_lines": { "type": "integer", "const": 120 }
+  }
+}

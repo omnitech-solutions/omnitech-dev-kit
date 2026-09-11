@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "omnitech-dev-kit/spend",
+  "title": "One spend row (JSON lines)",
+  "type": "object",
+  "required": ["ts", "role", "unit", "seconds", "exit", "cost_usd", "cumulative_usd", "log"],
+  "properties": {
+    "ts": { "type": "string" }, "role": { "type": "string" }, "unit": { "type": "string" },
+    "harness": { "type": "string" }, "model": { "type": "string" },
+    "seconds": { "type": "integer" }, "exit": { "type": "integer" },
+    "cost_usd": { "type": "number" }, "cumulative_usd": { "type": ["number", "null"] },
+    "log": { "type": "string" }
+  }
+}

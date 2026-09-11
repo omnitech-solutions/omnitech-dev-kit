@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "omnitech-dev-kit/receipt",
+  "title": "Verifier receipt (markdown, line-checked)",
+  "type": "object",
+  "required": ["verdict", "gate_lines"],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["ACCEPT", "REJECT"], "description": "first line must be exactly 'VERDICT: ACCEPT' or 'VERDICT: REJECT'" },
+    "gate_lines": {
+      "type": "array", "minItems": 1,
+      "items": { "type": "string", "pattern": "^gate: .+ \\(.+\\) → exit [0-9]+ — .+$" }
+    },
+    "max_lines": { "type": "integer", "const": 80 }
+  }
+}

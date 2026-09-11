@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "omnitech-dev-kit",
+  "description": "Marketplace for the omnitech-dev-kit companion plugin (runs beside crux).",
+  "owner": { "name": "Omnitech Solutions" },
+  "plugins": [
+    {
+      "name": "omnitech-dev-kit",
+      "description": "Companion to crux: bounded execution packets, independent verifier receipts, cost-guarded runs across harnesses, and a cross-project forge log in crux's locked format.",
+      "source": "./omnitech-dev-kit",
+      "category": "developer-tools"
+    }
+  ]
+}

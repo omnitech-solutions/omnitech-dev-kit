@@ -1,0 +1,6 @@
+{
+  "name": "omnitech-dev-kit",
+  "description": "Companion to crux: packets, receipts, cost-guarded multi-harness runs, cross-project forge log.",
+  "version": "0.1.0",
+  "homepage": "https://github.com/omnitech-solutions/omnitech-dev-kit"
+}

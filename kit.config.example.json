@@ -1,0 +1,15 @@
+{
+  "harness": "omp",
+  "run_cap_usd": 0.25,
+  "campaign_cap_usd": 2.00,
+  "campaign_baseline_usd": null,
+  "usage_probe": "openrouter",
+  "key_env": "OPENROUTER_API_KEY",
+  "usage_lag_seconds": 12,
+  "roles": {
+    "reader":       { "tools": "read,grep,glob",                 "max_time": "3m",  "approval": "always-ask" },
+    "orchestrator": { "tools": "read,grep,glob",                 "max_time": "4m",  "approval": "always-ask" },
+    "implementer":  { "tools": "read,grep,glob,edit,write,bash", "max_time": "12m", "approval": "yolo" },
+    "verifier":     { "tools": "read,grep,glob,bash",            "max_time": "9m",  "approval": "yolo" }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "omnitech-dev-kit/ledger-row",
+  "title": "Parity/behaviour ledger row",
+  "type": "object",
+  "required": ["id", "behaviour", "oracle_fixture", "subject_fixture", "verdict", "evidence_class"],
+  "properties": {
+    "id": { "type": "string" },
+    "behaviour": { "type": "string" },
+    "oracle_fixture": { "type": "string" },
+    "subject_fixture": { "type": "string" },
+    "verdict": { "type": "string", "enum": ["PASS", "FAIL", "PARTIAL", "UNCAPTURED", "NOT REPRODUCED"] },
+    "unit": { "type": "string" },
+    "gate": { "type": "string" },
+    "evidence_class": { "type": "string", "enum": ["fixture", "model-verified", "e2e", "human-live"],
+      "description": "a weaker class never satisfies a stronger gate" }
+  }
+}
