@@ -24,7 +24,7 @@ def fixture(live=None, receipt="VERDICT: ACCEPT\n\ngate: npm test exit 0 — pas
     subprocess.run(["git", "-C", str(d), "init", "-q"], check=False, capture_output=True)
     (d / "src").mkdir(); (d / "src" / "a.txt").write_text("before\n")
     git("add", "-A"); git("-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "init")
-    c = d / ".kit" / "parity"
+    c = d / ".desoleary" / "kit" / "parity"
     for s in ("packets", "receipts"):
         (c / s).mkdir(parents=True)
     (c / "config.json").write_text('{"live_gate": true, "crux": {"enabled": false}}')
@@ -42,7 +42,7 @@ def fixture(live=None, receipt="VERDICT: ACCEPT\n\ngate: npm test exit 0 — pas
 
 
 def accept(d):
-    return subprocess.run([str(BIN), "accept", "R-01", "--campaign", str(d / ".kit" / "parity")],
+    return subprocess.run([str(BIN), "accept", "R-01", "--campaign", str(d / ".desoleary" / "kit" / "parity")],
                           cwd=d, capture_output=True, text=True, env={**os.environ})
 
 

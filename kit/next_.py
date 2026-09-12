@@ -26,11 +26,17 @@ BLANK = ("<", ">")
 
 
 def blanks(packet: Path):
-    """The `<…>` spots a human still owes. Angle-bracket placeholders only; paths and code are safe."""
+    """The `<…>` spots a human still owes.
+
+    Code spans are stripped first: a packet that says `<button>` while naming a root cause is
+    finished prose, not an unfilled blank, and flagging it would block real work (caught on the
+    first real unit, 2026-09-12).
+    """
     import re
     out = []
     for line in packet.read_text().splitlines():
-        if re.search(r"<[a-z][^>`]{2,}>", line) and not line.lstrip().startswith(("- `", "`")):
+        prose = re.sub(r"`[^`]*`", "", line)
+        if re.search(r"<[a-z][^>]{2,}>", prose):
             out.append(line.strip())
     return out
 

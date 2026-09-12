@@ -19,7 +19,7 @@ def cmd_doctor():
     from .campaign import repo_root
     repo = repo_root()
     if repo:
-        camps = sorted((repo / ".kit").glob("*/config.json")) if (repo / ".kit").is_dir() else []
+        camps = sorted((repo / ".desoleary" / "kit").glob("*/config.json")) if (repo / ".desoleary" / "kit").is_dir() else []
         print(f"  repo        {repo}")
         print(f"  campaigns   {len(camps)}" + (f" ({', '.join(c.parent.name for c in camps)})" if camps else ""))
         from .crux import docs_dir

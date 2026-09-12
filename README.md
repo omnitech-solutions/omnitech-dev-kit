@@ -38,6 +38,8 @@ thing, and **stops at the next human gate**. Run it twice and it tells you the s
 cd <your repo>
 export OPENROUTER_API_KEY=...                      # lives in ~/.zshrc; never in a config file
 
+kit install                                        # FIRST: overlay, /kit-next, local-only ignores
+
 kit init parity \
   --oracle  "Qualtrics SV_xxx — observe-only, driven by the orchestrator" \
   --subject "http://127.0.0.1:5173/editor"
@@ -52,7 +54,8 @@ kit next                                           # → runs the unit, then pri
 kit next                                           # → commits and tags
 ```
 
-Everything lives in `.kit/<slug>/` as plain files you can read and edit without the tool.
+Everything lives in `.desoleary/kit/<slug>/` — the private overlay, never pushed — as plain files
+you can read and edit without the tool.
 
 ---
 

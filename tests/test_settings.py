@@ -1,0 +1,96 @@
+"""Layered settings: everything tunable, nothing tuned by accident.
+
+Precedence is default < machine < campaign < session(env) < flags, and the layer that set a value
+is reported so a surprising number always has a visible cause.
+"""
+import json, os, subprocess, sys, tempfile
+from pathlib import Path
+
+KIT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(KIT))
+from kit.settings import DEFAULTS, load, output_for  # noqa: E402
+
+
+def campaign(**cfg):
+    d = Path(tempfile.mkdtemp())
+    (d / "config.json").write_text(json.dumps(cfg))
+    return d
+
+
+def test_defaults_are_sane():
+    s, _ = load()
+    assert s["output"]["heartbeat_seconds"] == 30
+    assert s["caps"]["run_usd"] == 0.25 and s["caps"]["session_usd"] == 2.00
+
+
+def test_campaign_overrides_default_and_is_attributed():
+    s, prov = load(campaign(output={"heartbeat_seconds": 5}))
+    assert s["output"]["heartbeat_seconds"] == 5
+    assert prov["output.heartbeat_seconds"] == "campaign"
+
+
+def test_env_session_layer_beats_campaign():
+    c = campaign(output={"heartbeat_seconds": 5}, caps={"session_usd": 9})
+    os.environ["KIT_HEARTBEAT"] = "45"
+    os.environ["KIT_CAP_SESSION"] = "0.5"
+    try:
+        s, prov = load(c)
+        assert s["output"]["heartbeat_seconds"] == 45
+        assert s["caps"]["session_usd"] == 0.5
+        assert prov["output.heartbeat_seconds"] == "session"
+    finally:
+        del os.environ["KIT_HEARTBEAT"], os.environ["KIT_CAP_SESSION"]
+
+
+def test_flags_beat_everything():
+    s, prov = load(campaign(output={"heartbeat_seconds": 5}), flags={"output": {"heartbeat_seconds": 1}})
+    assert s["output"]["heartbeat_seconds"] == 1 and prov["output.heartbeat_seconds"] == "flags"
+
+
+def test_legacy_flat_caps_still_honoured():
+    s, _ = load(campaign(run_cap_usd=0.05, campaign_cap_usd=1.0))
+    assert s["caps"]["run_usd"] == 0.05 and s["caps"]["campaign_usd"] == 1.0
+
+
+def test_per_role_output_and_quiet():
+    s, _ = load(campaign(output={"heartbeat_seconds": 30, "per_role": {"verifier": {"heartbeat_seconds": 90}}}))
+    assert output_for(s, "verifier")["heartbeat_seconds"] == 90
+    assert output_for(s, "implementer")["heartbeat_seconds"] == 30
+    q, _ = load(campaign(output={"quiet": True}))
+    assert output_for(q, "implementer")["heartbeat_seconds"] == 0
+
+
+def test_session_cap_refuses_before_launching():
+    """A bad afternoon spread across campaigns is invisible to a campaign cap."""
+    d = Path(tempfile.mkdtemp())
+    (d / "AGENTS.md").write_text("law")
+    cfg = json.loads((KIT / "templates" / "config.json").read_text())
+    cfg["campaign_baseline_usd"] = 0
+    (d / "config.json").write_text(json.dumps(cfg))
+    (d / "spend.jsonl").write_text(json.dumps(
+        {"ts": "20260912T000000", "role": "implementer", "unit": "U", "cost_usd": 3.0,
+         "cost_known": True, "session": "S1"}) + "\n")
+    r = subprocess.run([sys.executable, str(KIT / "kit" / "run.py"), "reader", "T", str(d),
+                        "--config", str(d / "config.json"), "--no-advice", "--dry-run",
+                        "--", f"@{d / 'AGENTS.md'}", "q"],
+                       capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "KIT_SESSION_ID": "S1", "KIT_CAP_SESSION": "2.0"})
+    assert r.returncode == 4, (r.returncode, r.stdout[-300:], r.stderr[-300:])
+    assert "session S1" in r.stderr and "Nothing was launched" in r.stderr
+
+
+def test_session_cap_ignores_other_sessions():
+    d = Path(tempfile.mkdtemp())
+    (d / "AGENTS.md").write_text("law")
+    cfg = json.loads((KIT / "templates" / "config.json").read_text())
+    cfg["campaign_baseline_usd"] = 0
+    (d / "config.json").write_text(json.dumps(cfg))
+    (d / "spend.jsonl").write_text(json.dumps(
+        {"ts": "20260912T000000", "role": "implementer", "unit": "U", "cost_usd": 3.0,
+         "cost_known": True, "session": "OTHER"}) + "\n")
+    r = subprocess.run([sys.executable, str(KIT / "kit" / "run.py"), "reader", "T", str(d),
+                        "--config", str(d / "config.json"), "--no-advice", "--dry-run",
+                        "--", f"@{d / 'AGENTS.md'}", "q"],
+                       capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "KIT_SESSION_ID": "S2", "KIT_CAP_SESSION": "2.0"})
+    assert r.returncode == 0, r.stderr[-300:]

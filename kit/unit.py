@@ -34,6 +34,90 @@ from .crux import crux_inbox_drop
 from .campaign import gate_lines_from
 
 
+def run_stage(argv, cwd, label, cap_s=None, campaign=None):
+    """Launch a stage and print a heartbeat while it runs.
+
+    A stage that prints nothing for four minutes is indistinguishable from a hung one. The child's
+    own output still streams straight through; this only adds an elapsed line so the caller (and a
+    background task chip) always shows movement.
+    """
+    import threading
+    from .settings import load as load_settings, output_for
+    s, _ = load_settings(campaign)
+    o = output_for(s, label)
+    every = int(o.get("heartbeat_seconds") or 0)
+    logf = o.get("log")
+    start = time.time()
+    stop = threading.Event()
+
+    def emit(line):
+        if o.get("console", True):
+            say(line)
+        if logf:
+            with open(logf, "a") as f:
+                f.write(line + "\n")
+
+    def tick():
+        while not stop.wait(every):
+            el = int(time.time() - start)
+            emit(f"    … {label} {el // 60}m{el % 60:02d}s" + (f" of {cap_s // 60}m cap" if cap_s else ""))
+
+    if every > 0:
+        threading.Thread(target=tick, daemon=True).start()
+    try:
+        rc = subprocess.run(argv, cwd=cwd).returncode
+    finally:
+        stop.set()
+    el = int(time.time() - start)
+    emit(f"  {label} exit {rc} after {el // 60}m{el % 60:02d}s")
+    return rc
+
+
+def preflight(repo: Path, campaign: Path, packet: Path, wt: Path, n: str):
+    """Check EVERY stage's inputs before spending a cent on the first one.
+
+    Bought on 2026-09-12: an implementer ran 433s and $0.02, then the verifier died instantly
+    because `skills/borrowed/verify-test-teeth/SKILL.md` was missing — knowable in zero seconds.
+    A unit must fail in the first second or not at all.
+    """
+    agents = campaign / f"AGENTS-{slug(campaign.name, 24)}.md"
+    parts = {
+        "packet": packet,
+        "config": campaign / "config.json",
+        "implement promptbook": KIT / "promptbooks" / "implement.md",
+        "verify promptbook": KIT / "promptbooks" / "verify.md",
+        "preamble": KIT / "promptbooks" / "WHO-YOU-ARE.md",
+        "verify-test-teeth skill": KIT / "skills" / "borrowed" / "verify-test-teeth" / "SKILL.md",
+        "gate runner": HERE / "gates.py",
+        "runner": HERE / "run.py",
+        "gates.json": campaign / "gates.json",
+    }
+    if agents.is_file():
+        parts["campaign AGENTS"] = agents
+    missing = [f"{k}: {v}" for k, v in parts.items() if not Path(v).is_file()]
+
+    # every role this unit will use must name a model, and the adapter must exist
+    try:
+        cfg = json.loads((campaign / "config.json").read_text())
+    except (OSError, ValueError) as e:
+        missing.append(f"config unreadable: {e}")
+        cfg = {}
+    for role in ("implementer", "verifier"):
+        if not (cfg.get("models") or {}).get(role) and not (cfg.get("roles") or {}).get(role, {}).get("model"):
+            missing.append(f"no model named for role {role!r} (a default nobody chose is a bug)")
+    adapter = KIT / "harness" / f"{cfg.get('harness', 'omp')}.sh"
+    if not adapter.is_file():
+        missing.append(f"harness adapter: {adapter}")
+
+    if missing:
+        say("\n  PREFLIGHT FAILED — nothing was spent:")
+        for m in missing:
+            say(f"    missing  {m}")
+        die("fix the above and run `kit next` again. Every stage's inputs are checked before the "
+            "first one runs, so this costs you seconds rather than a whole unit.", 5)
+    say(f"  preflight ok ({len(parts)} inputs, both stages)")
+
+
 def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, last: bool, prev_unit):
     """worktree → implementer → gates → one-turn verifier → commit+tag on clean. Shared by the plan path
     (a projected Task) and the packet path (a hand-written unit)."""
@@ -64,16 +148,16 @@ def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, las
         say("\n  implementer skipped (--verify-only): verifying the worktree as it stands")
         rc = 0
     else:
+      preflight(repo, campaign, packet, wt, n)
       say("\n  implementer (guarded: exclusive scope, tool boundary, wall clock, budget)…")
-      rc = subprocess.run([
+      rc = run_stage([
         sys.executable, str(HERE / "run.py"), "implementer", f"{n}", str(wt),
         "--config", str(campaign / "config.json"), "--",
         f"@{campaign / f'AGENTS-{slug(campaign.name, 24)}.md'}" if (campaign / f"AGENTS-{slug(campaign.name,24)}.md").is_file()
         else f"@{packet}",
         f"@{KIT / 'promptbooks' / 'implement.md'}", f"@{packet}",
         f"Receipt path: {exec_receipt}. Run only the tests the packet names.",
-      ], cwd=str(wt)).returncode
-      say(f"  implementer exit {rc}")
+      ], cwd=str(wt), label="implementer", cap_s=720, campaign=campaign)
 
     say("\n  gates (run by the kit, not by a model)…")
     gate_record = campaign / f"gates-run-{n}.json"
@@ -106,19 +190,19 @@ def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, las
                ([str(exec_receipt)] if exec_receipt.is_file() else [])
     say("\n  verifier (one turn, no tools: diff + gate record inlined; does not re-run gates)…")
     receipt = campaign / "receipts" / f"{n}-receipt.md"
-    rc2 = subprocess.run([
+    rc2 = run_stage([
         sys.executable, str(HERE / "run.py"), "verifier", f"{n}", str(wt),
         "--config", str(campaign / "config.json"), "--out", str(receipt), "--validate", "receipt",
         "--prefetch", ",".join(prefetch), "--",
         f"@{KIT / 'promptbooks' / 'verify.md'}", f"@{packet}",
-        f"@{KIT / 'skills' / 'borrowed' / 'verify-test-teeth' / 'SKILL.md'}",
+        *[f"@{f}" for f in [KIT / "skills" / "borrowed" / "verify-test-teeth" / "SKILL.md"] if f.is_file()],
         f"You have NO tools and exactly one turn. The complete diff, every new file, the gate runner's record "
         f"and the implementer's receipt are inlined above — everything you need is already in front of you. "
         f"Do not ask to run or read anything. Copy the gate record's `gate:` lines verbatim. Judge the diff "
         f"against the packet and verify-test-teeth. Write the receipt as your entire answer, starting with "
         f"'VERDICT: ACCEPT' or 'VERDICT: REJECT'; it will be saved to {receipt}.",
-    ], cwd=str(wt)).returncode
-    say(f"  verifier exit {rc2}")
+    ], cwd=str(wt), label="verifier", cap_s=540, campaign=campaign)
+
 
     ok = rc == 0 and rc2 == 0
     try:

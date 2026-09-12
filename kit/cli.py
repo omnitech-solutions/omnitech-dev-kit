@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """cli.py — the dispatcher. Deliberately stupid: it parses argv and calls one function.
 
+    kit install [--with-rulesync]                  FIRST in any repo: overlay, commands, ignores
     kit next [--row ID] [--campaign DIR] [--dry]   the only verb you need
     kit init <slug> --oracle "..." --subject "..." scaffold a campaign here
     kit ledger add "<behaviour>" [--id ID]         add one observable row
@@ -33,6 +34,10 @@ def main(argv):
     if cmd == "next":
         from .next_ import cmd_next
         return cmd_next(campaign, harness, _opt(rest, "--row"), run="--dry" not in rest)
+
+    if cmd == "install":
+        from .install import cmd_install
+        return cmd_install(_opt(rest, "--repo"), "--with-rulesync" in rest)
 
     if cmd == "init":
         from .init_campaign import cmd_init

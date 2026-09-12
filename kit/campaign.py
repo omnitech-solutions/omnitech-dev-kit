@@ -70,7 +70,7 @@ def constraints_text(gates_doc, repo: Path) -> str:
 def campaign_for(repo: Path, ask: str, explicit) -> Path:
     if explicit:
         return Path(explicit).resolve()
-    return (repo / ".kit" / slug(ask)).resolve()
+    return (repo / ".desoleary" / "kit" / slug(ask)).resolve()
 
 
 DEFAULT_MODELS = {
@@ -163,7 +163,7 @@ Gap in one sentence: {behaviour}
 def newest_campaign(repo: Path, campaign_arg):
     if campaign_arg:
         return Path(campaign_arg).resolve()
-    cands = sorted((repo / ".kit").glob("*/config.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    cands = sorted((repo / ".desoleary" / "kit").glob("*/config.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     return cands[0].parent if cands else None
 
 

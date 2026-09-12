@@ -1,0 +1,43 @@
+id: kit-next
+description: Drive one observable difference between a reference system and ours to green, under the dev-kit guardrails
+intents:
+- parity
+- verified-change
+- next-unit
+priority: 5
+signals:
+- next unit
+- kit next
+- parity
+- matches the reference
+- ledger row
+- drive to green
+- one to one with
+- same as qualtrics
+sources: []
+stages:
+- id: capture
+  skills:
+  - omnitech-dev-kit
+  sourceSkills: []
+  gate: none
+- id: packet
+  skills:
+  - omnitech-dev-kit
+  sourceSkills: []
+  gate: approval
+- id: execute
+  skills:
+  - omnitech-dev-kit
+  sourceSkills: []
+  gate: none
+- id: verify
+  skills:
+  - omnitech-dev-kit
+  sourceSkills: []
+  gate: evidence
+- id: accept
+  skills:
+  - omnitech-dev-kit
+  sourceSkills: []
+  gate: approval

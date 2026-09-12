@@ -35,7 +35,7 @@ from .campaign import unit_targets, unit_totals
 
 def cmd_status():
     repo = repo_root() or die("not inside a git repository")
-    root = repo / ".kit"
+    root = repo / ".desoleary" / "kit"
     camps = sorted(root.glob("*/config.json")) if root.is_dir() else []
     if not camps:
         say("no campaigns yet. Start one with: kit do \"<what you want built>\"")

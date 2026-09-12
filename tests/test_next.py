@@ -29,7 +29,7 @@ def repo():
 
 def campaign(d):
     kit(d, "init", "parity", "--oracle", "REF (observe-only)", "--subject", "http://localhost:1")
-    return d / ".kit" / "parity"
+    return d / ".desoleary" / "kit" / "parity"
 
 
 def test_next_without_campaign_explains_how_to_start():

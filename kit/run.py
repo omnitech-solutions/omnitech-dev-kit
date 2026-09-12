@@ -258,6 +258,36 @@ def main(argv):
     spend_dir = Path(opts["--spend-dir"] or cfg_path.parent).resolve()
     adapter = KIT / "harness" / f"{harness}.sh"
     if not adapter.is_file(): die(f"no adapter {adapter}")
+    # Session and daily caps: the campaign cap cannot see a bad afternoon spread across campaigns.
+    # KIT_SESSION_ID groups the runs of one orchestrator session (or one background task).
+    # run.py is executed as a script, so a package-relative import would fail here — and a swallowed
+    # import is exactly how a cap silently stops guarding. Load by path and let a real error speak.
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("kit_settings", HERE / "settings.py")
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    _s, _prov = _mod.load(spend_dir)
+    _caps = _s.get("caps") or {}
+    _sid = os.environ.get("KIT_SESSION_ID")
+    spend_file = spend_dir / "spend.jsonl"
+    if spend_file.is_file():
+        _rows = [json.loads(l) for l in spend_file.read_text().splitlines() if l.strip()]
+        for _key, _field, _label in (("session_usd", "session", f"session {_sid}"),
+                                     ("daily_usd", "day", f"today ({time.strftime('%Y-%m-%d')})")):
+            _limit = _caps.get(_key)
+            if not _limit:
+                continue
+            _want = _sid if _field == "session" else time.strftime("%Y%m%d")
+            if _field == "session" and not _sid:
+                continue
+            _spent = sum(float(r.get("cost_usd") or 0) for r in _rows
+                         if (r.get("session") == _want if _field == "session"
+                             else str(r.get("ts", ""))[:8] == _want))
+            if _spent >= float(_limit):
+                die(f"BUDGET: {_label} has spent ${_spent:.4f} of its ${float(_limit):.2f} cap "
+                    f"(caps.{_key}, set by {_prov.get('caps.' + _key, 'default')}). Nothing was launched. "
+                    f"Raise it deliberately or start a new session.", 4)
+
     # WHO-YOU-ARE goes first in every prompt. It is the owner's standing instruction to every model the kit
     # runs, including whoever orchestrates: verify before asserting, read before inferring, never defer,
     # write learnings down now. Only --no-preamble removes it, and that is deliberate friction.
@@ -526,7 +556,8 @@ def main(argv):
            "validated": validated, "log": f"runs/{log.name}", "campaign": cfg.get("campaign", ""),
            "prompt_tokens_est": est, "loop_suspected": diag.get("loop_suspected"),
            "distinct_tools": diag.get("distinct_tools"), "loop_killed": bool(loop_killed),
-           "probe_error": probe_error, "status": "finished"}
+           "probe_error": probe_error, "status": "finished",
+           "session": os.environ.get("KIT_SESSION_ID")}
     anomalies = []
     if rc_exit == 0 and cost is None and probe_mode != "none" and not model.startswith(local_prefixes):
         anomalies.append("unmeasured cost on a paid model: the request may never have reached it")

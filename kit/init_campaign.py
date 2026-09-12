@@ -35,7 +35,7 @@ read the test, mutation-tested it, confirmed the behaviour live, and written `re
 def cmd_init(slug_arg: str, oracle: str, subject: str, harness: str):
     repo = repo_root() or die("not inside a git repository")
     name = slug(slug_arg, 40)
-    campaign = repo / ".kit" / name
+    campaign = repo / ".desoleary" / "kit" / name
     if (campaign / "config.json").is_file():
         say(f"campaign already exists: {campaign.relative_to(repo)}")
         return 0
