@@ -60,37 +60,73 @@ def test_per_role_output_and_quiet():
     assert output_for(q, "implementer")["heartbeat_seconds"] == 0
 
 
-def test_session_cap_refuses_before_launching():
-    """A bad afternoon spread across campaigns is invisible to a campaign cap."""
+def _campaign_with_config():
     d = Path(tempfile.mkdtemp())
     (d / "AGENTS.md").write_text("law")
     cfg = json.loads((KIT / "templates" / "config.json").read_text())
     cfg["campaign_baseline_usd"] = 0
     (d / "config.json").write_text(json.dumps(cfg))
-    (d / "spend.jsonl").write_text(json.dumps(
-        {"ts": "20260912T000000", "role": "implementer", "unit": "U", "cost_usd": 3.0,
-         "cost_known": True, "session": "S1"}) + "\n")
-    r = subprocess.run([sys.executable, str(KIT / "kit" / "run.py"), "reader", "T", str(d),
-                        "--config", str(d / "config.json"), "--no-advice", "--dry-run",
-                        "--", f"@{d / 'AGENTS.md'}", "q"],
-                       capture_output=True, text=True,
-                       env={"PATH": "/usr/bin:/bin", "KIT_SESSION_ID": "S1", "KIT_CAP_SESSION": "2.0"})
-    assert r.returncode == 4, (r.returncode, r.stdout[-300:], r.stderr[-300:])
+    return d
+
+
+def _seed_machine_ledger(kit_home, session, cost, ts="20260912T000000"):
+    """Spend lands in the machine ledger, which is what the session cap reads."""
+    sessions = Path(kit_home) / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    (sessions / f"{session}.jsonl").write_text(json.dumps(
+        {"ts": ts, "role": "implementer", "unit": "U", "cost_usd": cost,
+         "cost_known": True, "session": session}) + "\n")
+
+
+def _dry_run(d, env):
+    return subprocess.run([sys.executable, str(KIT / "kit" / "run.py"), "reader", "T", str(d),
+                           "--config", str(d / "config.json"), "--no-advice", "--dry-run",
+                           "--", f"@{d / 'AGENTS.md'}", "q"],
+                          capture_output=True, text=True,
+                          env={"PATH": "/usr/bin:/bin", **env})
+
+
+def test_session_cap_refuses_before_launching(isolated_kit_home):
+    d = _campaign_with_config()
+    _seed_machine_ledger(isolated_kit_home, "S1", 3.0)
+    r = _dry_run(d, {"KIT_HOME": isolated_kit_home, "KIT_SESSION_ID": "S1", "KIT_CAP_SESSION": "2.0"})
+    assert r.returncode == 4, (r.returncode, r.stderr[-300:])
     assert "session S1" in r.stderr and "Nothing was launched" in r.stderr
 
 
-def test_session_cap_ignores_other_sessions():
-    d = Path(tempfile.mkdtemp())
-    (d / "AGENTS.md").write_text("law")
-    cfg = json.loads((KIT / "templates" / "config.json").read_text())
-    cfg["campaign_baseline_usd"] = 0
-    (d / "config.json").write_text(json.dumps(cfg))
-    (d / "spend.jsonl").write_text(json.dumps(
-        {"ts": "20260912T000000", "role": "implementer", "unit": "U", "cost_usd": 3.0,
-         "cost_known": True, "session": "OTHER"}) + "\n")
-    r = subprocess.run([sys.executable, str(KIT / "kit" / "run.py"), "reader", "T", str(d),
-                        "--config", str(d / "config.json"), "--no-advice", "--dry-run",
-                        "--", f"@{d / 'AGENTS.md'}", "q"],
-                       capture_output=True, text=True,
-                       env={"PATH": "/usr/bin:/bin", "KIT_SESSION_ID": "S2", "KIT_CAP_SESSION": "2.0"})
+def test_session_cap_ignores_other_sessions(isolated_kit_home):
+    d = _campaign_with_config()
+    _seed_machine_ledger(isolated_kit_home, "OTHER", 3.0)
+    r = _dry_run(d, {"KIT_HOME": isolated_kit_home, "KIT_SESSION_ID": "S2", "KIT_CAP_SESSION": "2.0"})
     assert r.returncode == 0, r.stderr[-300:]
+
+
+def test_session_cap_binds_ACROSS_campaigns(isolated_kit_home):
+    """The bug this layer exists for.
+
+    spend.jsonl is per campaign, so two campaigns in one session each got their own budget and the
+    session cap silently did not bind. Spend recorded while working campaign A must stop campaign B.
+    """
+    _seed_machine_ledger(isolated_kit_home, "S3", 3.0)      # earned in campaign A
+    b = _campaign_with_config()                              # a different campaign, no local spend
+    assert not (b / "spend.jsonl").exists()
+    r = _dry_run(b, {"KIT_HOME": isolated_kit_home, "KIT_SESSION_ID": "S3", "KIT_CAP_SESSION": "2.0"})
+    assert r.returncode == 4, (r.returncode, r.stderr[-300:])
+    assert "session S3" in r.stderr
+
+
+def test_daily_cap_spans_sessions(isolated_kit_home):
+    import time as _t
+    today = _t.strftime("%Y%m%d")
+    _seed_machine_ledger(isolated_kit_home, "morning", 1.5, ts=f"{today}T090000")
+    d = _campaign_with_config()
+    r = _dry_run(d, {"KIT_HOME": isolated_kit_home, "KIT_SESSION_ID": "afternoon", "KIT_CAP_DAILY": "1.0"})
+    assert r.returncode == 4 and "today" in r.stderr
+
+
+def test_machine_halt_stops_every_campaign(isolated_kit_home):
+    (Path(isolated_kit_home) / "HALTED.json").write_text(json.dumps(
+        {"at": "now", "reasons": ["a runaway unit in another campaign"]}))
+    d = _campaign_with_config()
+    r = _dry_run(d, {"KIT_HOME": isolated_kit_home})
+    assert r.returncode == 4 and "Every campaign on this machine" in r.stderr

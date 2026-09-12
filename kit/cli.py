@@ -7,7 +7,8 @@
     kit ledger add "<behaviour>" [--id ID]         add one observable row
     kit config [explain <section.key>]             resolved settings and which layer set them
     kit status                                     ledger, cost table, what is waiting on you
-    kit resume                                     clear a watchdog halt, after reading why
+    kit resume [--machine]                         clear a halt, after reading why
+    kit home                                       the machine layer: session spend, campaigns, halts
     kit accept <row>                               commit + tag (kit next does this for you)
     kit unit <row>                                 execute one packet (kit next does this for you)
     kit gates [--scope selected|full] [--detect]   deterministic gates, no model
@@ -96,6 +97,17 @@ def main(argv):
         return 0
 
     if cmd == "resume":
+        if "--machine" in rest:
+            from . import home as H
+            h = H.halted()
+            if not h:
+                print("no machine-level halt")
+                return 0
+            for r in h.get("reasons", []):
+                print(f"  cleared: {r}")
+            H.halt_file().unlink()
+            print(f"resumed. every campaign on this machine may run again ({H.home()}).")
+            return 0
         from .watchdog import halt_file, halted
         from .campaign import newest_campaign, repo_root
         repo = repo_root()
@@ -111,6 +123,24 @@ def main(argv):
             print(f"  cleared: {r}")
         halt_file(camp).unlink()
         print("resumed. `kit next` will run again.")
+        return 0
+
+    if cmd == "home":
+        from . import home as H
+        print(f"KIT_HOME  {H.home()}")
+        print(f"session   {H.session_id()}   ${H.spent():.4f}")
+        import time as _t
+        print(f"today     ${H.spent(since_day=_t.strftime('%Y%m%d')):.4f}")
+        if (h := H.halted()):
+            print(f"\n** HALTED ** {h.get('at','')}")
+            for r in h.get("reasons", []):
+                print(f"   {r}")
+            print("   clear with: kit resume --machine")
+        camps = H.campaigns()
+        if camps:
+            print(f"\ncampaigns seen ({len(camps)}):")
+            for path, agg in sorted(camps.items(), key=lambda kv: kv[1]["at"] or "", reverse=True):
+                print(f"  {agg['at'][:16]:16s}  ${agg['usd']:7.4f}  {agg['runs']:3d} runs  {path}")
         return 0
 
     if cmd == "status":

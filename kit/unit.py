@@ -73,6 +73,61 @@ def run_stage(argv, cwd, label, cap_s=None, campaign=None):
     return rc
 
 
+TROUBLE = ("diverged", "could not write", "failed to write", "editor state", "tool error",
+           "unable to edit", "write failed")
+
+
+def main_status(repo: Path) -> str:
+    """A fingerprint of the primary checkout. A worker must never touch it (FF-09, 2026-09-10:
+    absolute paths leaked from a receipt and the implementer edited main as well as its worktree)."""
+    return sh(["git", "-C", str(repo), "status", "--porcelain"]).stdout
+
+
+def incomplete_receipt(campaign: Path, repo: Path, wt: Path, unit: str, role: str, rc: int, log_tail=""):
+    """The kit writes this, because a model killed by the wall clock cannot.
+
+    Packet §7 asks the worker to record what it finished. That works when a gate fails, and not at
+    all when the process is killed — which is exactly the case where you would otherwise have
+    nothing to show for 90% of an implementation.
+    """
+    stat = sh(["git", "-C", str(wt), "diff", "--stat"]).stdout.strip()
+    files = [l[3:].strip() for l in sh(["git", "-C", str(wt), "status", "--porcelain"]).stdout.splitlines()]
+    why = {124: "wall clock", 3: "per-run cost cap", 4: "budget", 125: "loop watchdog"}.get(rc, f"exit {rc}")
+    f = campaign / "receipts" / f"{unit}-execution.md"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(f"""STATUS: INCOMPLETE ({role} stopped by {why})
+
+Written by the kit, not by the model: a stopped worker cannot report on itself.
+
+worktree: {wt}
+branch:   {sh(["git", "-C", str(wt), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}
+changed:  {len(files)} file(s)
+{stat or '  (no changes on disk)'}
+
+files:
+{chr(10).join('  ' + x for x in files) or '  none'}
+
+The work above is on disk and is NOT lost. Choose one:
+  resume   kit next                      # re-runs the packet against this worktree, keeping the work
+  discard  git -C {wt} checkout -- .
+  inspect  git -C {wt} diff
+
+last output before the stop:
+{log_tail.strip()[-1200:] or '  (nothing captured)'}
+""")
+    return f
+
+
+def receipt_trouble(campaign: Path, unit: str):
+    """A receipt that mentions tool trouble is RED until re-run (FF-09: an implementer reported
+    typecheck clean and seven tests green while the file on disk did not compile)."""
+    f = campaign / "receipts" / f"{unit}-execution.md"
+    if not f.is_file():
+        return []
+    low = f.read_text().lower()
+    return [w for w in TROUBLE if w in low]
+
+
 def preflight(repo: Path, campaign: Path, packet: Path, wt: Path, n: str):
     """Check EVERY stage's inputs before spending a cent on the first one.
 
@@ -116,6 +171,7 @@ def preflight(repo: Path, campaign: Path, packet: Path, wt: Path, n: str):
         die("fix the above and run `kit next` again. Every stage's inputs are checked before the "
             "first one runs, so this costs you seconds rather than a whole unit.", 5)
     say(f"  preflight ok ({len(parts)} inputs, both stages)")
+    return main_status(repo)
 
 
 def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, last: bool, prev_unit):
@@ -148,7 +204,7 @@ def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, las
         say("\n  implementer skipped (--verify-only): verifying the worktree as it stands")
         rc = 0
     else:
-      preflight(repo, campaign, packet, wt, n)
+      main_before = preflight(repo, campaign, packet, wt, n)
       say("\n  implementer (guarded: exclusive scope, tool boundary, wall clock, budget)…")
       rc = run_stage([
         sys.executable, str(HERE / "run.py"), "implementer", f"{n}", str(wt),
@@ -158,6 +214,27 @@ def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, las
         f"@{KIT / 'promptbooks' / 'implement.md'}", f"@{packet}",
         f"Receipt path: {exec_receipt}. Run only the tests the packet names.",
       ], cwd=str(wt), label="implementer", cap_s=720, campaign=campaign)
+
+      if main_status(repo) != main_before:
+          say("\n  MAIN CHECKOUT CHANGED during the run. A worker must only ever touch its worktree.")
+          say("    Inspect `git -C %s status` before trusting anything here." % repo)
+          from .watchdog import halt_file
+          halt_file(campaign).write_text(json.dumps({
+              "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "unit": n, "role": "implementer",
+              "reasons": ["the primary checkout changed while a worker was running (FF-09)"],
+              "clear_with": "kit resume, after you have checked and reverted main",
+          }, indent=2) + "\n")
+          die("halted: the primary checkout changed during a worker run", 4)
+
+      if rc != 0 and not exec_receipt.is_file():
+          log = next(iter(sorted((campaign / "runs").glob(f"*implementer-{n}.log"), reverse=True)), None)
+          f = incomplete_receipt(campaign, repo, wt, n, "implementer", rc,
+                                 log.read_text() if log and log.is_file() else "")
+          say(f"  wrote {f.relative_to(repo)} — the partial work is kept in the worktree, not lost")
+
+      if (words := receipt_trouble(campaign, n)):
+          say(f"  receipt mentions tool trouble ({', '.join(words)}) — treating it as RED; "
+              f"the verifier re-runs every gate itself")
 
     say("\n  gates (run by the kit, not by a model)…")
     gate_record = campaign / f"gates-run-{n}.json"

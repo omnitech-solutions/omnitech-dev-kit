@@ -258,8 +258,9 @@ def main(argv):
     spend_dir = Path(opts["--spend-dir"] or cfg_path.parent).resolve()
     adapter = KIT / "harness" / f"{harness}.sh"
     if not adapter.is_file(): die(f"no adapter {adapter}")
-    # Session and daily caps: the campaign cap cannot see a bad afternoon spread across campaigns.
-    # KIT_SESSION_ID groups the runs of one orchestrator session (or one background task).
+    # Session and daily caps read the MACHINE ledger at $KIT_HOME, never this campaign's spend.jsonl.
+    # A campaign cap cannot see a bad afternoon spread across campaigns: two campaigns in one session
+    # each got their own budget and the cap silently did not bind (found by audit 2026-09-12).
     # run.py is executed as a script, so put the kit root on sys.path and import the real package.
     # Path-loading a single module breaks its own relative imports; a swallowed ImportError is how a
     # cap silently stops guarding, so this import is deliberate and unguarded.
@@ -270,26 +271,24 @@ def main(argv):
                                                 "model": model, "campaign": cfg.get("campaign"),
                                                 "repo": Path(cwd).name,
                                                 "session": os.environ.get("KIT_SESSION_ID")})
+    from kit import home as kit_home
     _caps = _s.get("caps") or {}
-    _sid = os.environ.get("KIT_SESSION_ID")
-    spend_file = spend_dir / "spend.jsonl"
-    if spend_file.is_file():
-        _rows = [json.loads(l) for l in spend_file.read_text().splitlines() if l.strip()]
-        for _key, _field, _label in (("session_usd", "session", f"session {_sid}"),
-                                     ("daily_usd", "day", f"today ({time.strftime('%Y-%m-%d')})")):
-            _limit = _caps.get(_key)
-            if not _limit:
-                continue
-            _want = _sid if _field == "session" else time.strftime("%Y%m%d")
-            if _field == "session" and not _sid:
-                continue
-            _spent = sum(float(r.get("cost_usd") or 0) for r in _rows
-                         if (r.get("session") == _want if _field == "session"
-                             else str(r.get("ts", ""))[:8] == _want))
-            if _spent >= float(_limit):
-                die(f"BUDGET: {_label} has spent ${_spent:.4f} of its ${float(_limit):.2f} cap "
-                    f"(caps.{_key}, set by {_prov.get('caps.' + _key, 'default')}). Nothing was launched. "
-                    f"Raise it deliberately or start a new session.", 4)
+    _sid = kit_home.session_id()
+    # A machine-level halt stops every campaign everywhere, not just this one.
+    if (_m := kit_home.halted()):
+        die("HALTED at $KIT_HOME: " + "; ".join(_m.get("reasons", [])) +
+            "\n  Every campaign on this machine is stopped. Read why, then: kit resume --machine", 4)
+    for _key, _label, _spent in (
+            ("session_usd", f"session {_sid}", kit_home.spent(_sid)),
+            ("daily_usd", f"today ({time.strftime('%Y-%m-%d')})",
+             kit_home.spent(since_day=time.strftime("%Y%m%d")))):
+        _limit = _caps.get(_key)
+        if _limit and _spent >= float(_limit):
+            kit_home.halt([f"{_label} spent ${_spent:.4f} of its ${float(_limit):.2f} cap (caps.{_key})"],
+                          {"role": role, "unit": unit, "model": model})
+            die(f"BUDGET: {_label} has spent ${_spent:.4f} of its ${float(_limit):.2f} cap "
+                f"(caps.{_key}, set by {_prov.get('caps.' + _key, 'default')}). Nothing was launched. "
+                f"Raise it deliberately, or `kit resume --machine` once you have decided.", 4)
 
     # WHO-YOU-ARE goes first in every prompt. It is the owner's standing instruction to every model the kit
     # runs, including whoever orchestrates: verify before asserting, read before inferring, never defer,
@@ -581,6 +580,7 @@ def main(argv):
         f.write(json.dumps(row) + "\n")
     # The brake. Caps answer "over the line?"; this answers "unlike every run before it?" and can
     # stop the campaign with nobody watching.
+    kit_home.record(row, repo=Path(cwd), campaign=spend_dir)
     from kit.watchdog import check_and_record
     check_and_record(spend_dir, row, _s, say=lambda m: print(m, file=sys.stderr))
     cost_cell = f"${cost:.4f}" if cost is not None else "unknown"
