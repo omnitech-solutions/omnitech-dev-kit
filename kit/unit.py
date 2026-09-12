@@ -73,13 +73,49 @@ def run_stage(argv, cwd, label, cap_s=None, campaign=None):
     return rc
 
 
+def house_parts(repo: Path):
+    """The repo's own AI instructions, first in the prompt, ahead of anything of ours.
+
+    Constraints frame the task, so they come before it. Until 2026-09-12 no worker had ever seen
+    this repo's AGENTS.md — including its "No mock tests. Zero." — which held only because the
+    orchestrator typed it into each packet by hand.
+    """
+    cfg = repo / ".desoleary" / "kit" / "kit.json"
+    if not cfg.is_file():
+        return [], []
+    try:
+        doc = json.loads(cfg.read_text())
+    except ValueError:
+        return [], []
+    parts = [f"@{repo / h['path']}" for h in (doc.get("house_rules") or {}).get("found", [])
+             if h.get("inject") and (repo / h["path"]).is_file()]
+    env = doc.get("environment") or {}
+    lines = [f"Repository facts (detected by kit install; do not guess these):",
+             f"  app root: {env.get('app_root')}   package manager: {env.get('package_manager')}"]
+    for role, cmd in (env.get("commands") or {}).items():
+        lines.append(f"  {role}: `{cmd}`  (run from {env.get('app_root')})")
+    if env.get("dev_url"):
+        lines.append(f"  the running app: {env['dev_url']}")
+    for n in env.get("notes") or []:
+        lines.append(f"  note: {n}")
+    refs = [h["path"] for h in (doc.get("house_rules") or {}).get("found", []) if not h.get("inject")]
+    if refs:
+        lines.append(f"  this repository's other standing instructions live at: {', '.join(refs)}")
+    lines.append("These repository rules outrank anything in the kit's promptbooks or this packet. "
+                 "If the packet asks for something they forbid, stop and say so.")
+    return parts, ["\n".join(lines)]
+
+
 TROUBLE = ("diverged", "could not write", "failed to write", "editor state", "tool error",
            "unable to edit", "write failed")
 
 
-def main_status(repo: Path) -> str:
-    """A fingerprint of the primary checkout. A worker must never touch it (FF-09, 2026-09-10:
-    absolute paths leaked from a receipt and the implementer edited main as well as its worktree)."""
+def host_status(repo: Path) -> str:
+    """A fingerprint of the checkout you launched from — whatever branch that is, not `main`.
+
+    A worker must never touch it (FF-09, 2026-09-10: absolute paths leaked from a receipt and the
+    implementer edited the host checkout as well as its own worktree).
+    """
     return sh(["git", "-C", str(repo), "status", "--porcelain"]).stdout
 
 
@@ -171,7 +207,7 @@ def preflight(repo: Path, campaign: Path, packet: Path, wt: Path, n: str):
         die("fix the above and run `kit next` again. Every stage's inputs are checked before the "
             "first one runs, so this costs you seconds rather than a whole unit.", 5)
     say(f"  preflight ok ({len(parts)} inputs, both stages)")
-    return main_status(repo)
+    return host_status(repo)
 
 
 def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, last: bool, prev_unit):
@@ -185,7 +221,15 @@ def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, las
     if not wt.exists():
         prev = f"kit/{campaign.name}-{prev_unit.lower()}" if prev_unit else ""
         has_prev = bool(prev) and sh(["git", "-C", str(repo), "rev-parse", "--verify", "-q", prev]).returncode == 0
-        base = prev if has_prev else sh(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
+        # The base is a decision about THIS unit, never the repo's default branch: --base wins,
+        # then the previous accepted unit when chaining, then the branch you invoked from.
+        explicit = sys.argv[sys.argv.index("--base") + 1] if "--base" in sys.argv else None
+        cfg_base = (json.loads((campaign / "config.json").read_text()).get("worktree") or {}).get("base") \
+            if (campaign / "config.json").is_file() else None
+        base = explicit or (prev if has_prev else None) or cfg_base or \
+            sh(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
+        if explicit:
+            say(f"  base {base} (--base)")
         if has_prev:
             say(f"  chaining from {prev} (previous task's accepted branch)")
         r = sh(["git", "-C", str(repo), "worktree", "add", "-b", branch, str(wt), base])
@@ -204,27 +248,29 @@ def run_unit(repo: Path, campaign: Path, packet: Path, unit: str, name: str, las
         say("\n  implementer skipped (--verify-only): verifying the worktree as it stands")
         rc = 0
     else:
-      main_before = preflight(repo, campaign, packet, wt, n)
+      host_before = preflight(repo, campaign, packet, wt, n)
       say("\n  implementer (guarded: exclusive scope, tool boundary, wall clock, budget)…")
+      house, facts = house_parts(repo)
       rc = run_stage([
         sys.executable, str(HERE / "run.py"), "implementer", f"{n}", str(wt),
         "--config", str(campaign / "config.json"), "--",
+        *house, *facts,
         f"@{campaign / f'AGENTS-{slug(campaign.name, 24)}.md'}" if (campaign / f"AGENTS-{slug(campaign.name,24)}.md").is_file()
         else f"@{packet}",
         f"@{KIT / 'promptbooks' / 'implement.md'}", f"@{packet}",
         f"Receipt path: {exec_receipt}. Run only the tests the packet names.",
       ], cwd=str(wt), label="implementer", cap_s=720, campaign=campaign)
 
-      if main_status(repo) != main_before:
-          say("\n  MAIN CHECKOUT CHANGED during the run. A worker must only ever touch its worktree.")
+      if host_status(repo) != host_before:
+          say("\n  THE CHECKOUT YOU LAUNCHED FROM CHANGED during the run. A worker must only touch its worktree.")
           say("    Inspect `git -C %s status` before trusting anything here." % repo)
           from .watchdog import halt_file
           halt_file(campaign).write_text(json.dumps({
               "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "unit": n, "role": "implementer",
-              "reasons": ["the primary checkout changed while a worker was running (FF-09)"],
+              "reasons": ["the checkout the unit was launched from changed while a worker ran (FF-09)"],
               "clear_with": "kit resume, after you have checked and reverted main",
           }, indent=2) + "\n")
-          die("halted: the primary checkout changed during a worker run", 4)
+          die("halted: the checkout you launched from changed during a worker run", 4)
 
       if rc != 0 and not exec_receipt.is_file():
           log = next(iter(sorted((campaign / "runs").glob(f"*implementer-{n}.log"), reverse=True)), None)

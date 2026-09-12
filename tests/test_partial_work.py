@@ -16,7 +16,7 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(KIT))
-from kit.unit import incomplete_receipt, main_status, receipt_trouble  # noqa: E402
+from kit.unit import host_status, incomplete_receipt, receipt_trouble  # noqa: E402
 
 
 def repo_and_worktree():
@@ -59,13 +59,13 @@ def test_the_partial_work_itself_survives_on_disk():
     assert "src.txt" in diff
 
 
-def test_main_checkout_fingerprint_detects_contamination():
+def test_host_checkout_fingerprint_detects_contamination():
     d, camp, wt = repo_and_worktree()
-    before = main_status(d)
+    before = host_status(d)
     (wt / "src.txt").write_text("worker edits its own worktree\n")
-    assert main_status(d) == before, "a worktree edit must not register as main changing"
+    assert host_status(d) == before, "a worktree edit must not register as main changing"
     (d / "src.txt").write_text("a worker reached into main\n")
-    assert main_status(d) != before, "an edit to main must be detected"
+    assert host_status(d) != before, "an edit to main must be detected"
 
 
 def test_receipt_mentioning_tool_trouble_is_flagged():

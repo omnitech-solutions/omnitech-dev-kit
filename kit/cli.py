@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """cli.py — the dispatcher. Deliberately stupid: it parses argv and calls one function.
 
-    kit install [--with-rulesync]                  FIRST in any repo: overlay, commands, ignores
+    kit install [--interactive]                    FIRST in any repo. Automatic by default:
+                                                   probes and writes only into .desoleary/.
     kit next [--row ID] [--campaign DIR] [--dry]   the only verb you need
     kit init <slug> --oracle "..." --subject "..." scaffold a campaign here
     kit ledger add "<behaviour>" [--id ID]         add one observable row
@@ -40,7 +41,8 @@ def main(argv):
 
     if cmd == "install":
         from .install import cmd_install
-        return cmd_install(_opt(rest, "--repo"), "--with-rulesync" in rest)
+        return cmd_install(_opt(rest, "--repo"),
+                           interactive="--interactive" in rest or "-i" in rest)
 
     if cmd == "init":
         from .init_campaign import cmd_init
