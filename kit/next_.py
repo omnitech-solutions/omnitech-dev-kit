@@ -57,6 +57,15 @@ def cmd_next(campaign_arg=None, harness=None, row_arg=None, run=True):
     if campaign is None or not (campaign / "config.json").is_file():
         die('no campaign here. Start one with:\n  kit init <slug> --oracle "<reference>" --subject "<ours>"')
     cfg = _meta(campaign)
+    from .watchdog import halted
+    if (h := halted(campaign)) and "--resume" not in sys.argv:
+        say(f"kit next: {campaign.relative_to(repo)}")
+        say(f"\n  HALTED by the watchdog at {h.get('at', '?')} on unit {h.get('unit')}:")
+        for r in h.get("reasons", []):
+            say(f"    {r}")
+        say(f"\n  cost ${h.get('cost_usd')} · {h.get('seconds')}s · model {h.get('model')}")
+        say(f"  Read the run log, decide, then: kit resume")
+        return 4
     rows = ledger.rows(campaign)
     row = next((r for r in rows if r["id"] == row_arg), None) if row_arg else ledger.next_open(campaign)
     say(f"kit next: {campaign.relative_to(repo)}")

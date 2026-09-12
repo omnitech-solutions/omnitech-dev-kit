@@ -260,13 +260,16 @@ def main(argv):
     if not adapter.is_file(): die(f"no adapter {adapter}")
     # Session and daily caps: the campaign cap cannot see a bad afternoon spread across campaigns.
     # KIT_SESSION_ID groups the runs of one orchestrator session (or one background task).
-    # run.py is executed as a script, so a package-relative import would fail here — and a swallowed
-    # import is exactly how a cap silently stops guarding. Load by path and let a real error speak.
-    import importlib.util
-    _spec = importlib.util.spec_from_file_location("kit_settings", HERE / "settings.py")
-    _mod = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
-    _s, _prov = _mod.load(spend_dir)
+    # run.py is executed as a script, so put the kit root on sys.path and import the real package.
+    # Path-loading a single module breaks its own relative imports; a swallowed ImportError is how a
+    # cap silently stops guarding, so this import is deliberate and unguarded.
+    if str(KIT) not in sys.path:
+        sys.path.insert(0, str(KIT))
+    from kit.settings import load as load_settings
+    _s, _prov = load_settings(spend_dir, facts={"role": role, "harness": harness, "unit": unit,
+                                                "model": model, "campaign": cfg.get("campaign"),
+                                                "repo": Path(cwd).name,
+                                                "session": os.environ.get("KIT_SESSION_ID")})
     _caps = _s.get("caps") or {}
     _sid = os.environ.get("KIT_SESSION_ID")
     spend_file = spend_dir / "spend.jsonl"
@@ -576,6 +579,10 @@ def main(argv):
         print(f"run.py: NOTE {a}", file=sys.stderr)
     with open(spend_dir / "spend.jsonl", "a") as f:
         f.write(json.dumps(row) + "\n")
+    # The brake. Caps answer "over the line?"; this answers "unlike every run before it?" and can
+    # stop the campaign with nobody watching.
+    from kit.watchdog import check_and_record
+    check_and_record(spend_dir, row, _s, say=lambda m: print(m, file=sys.stderr))
     cost_cell = f"${cost:.4f}" if cost is not None else "unknown"
     with open(spend_dir / "spend.md", "a") as f:
         f.write(f"| {ts} | {role} | {unit} | {secs}s | exit {rc_exit} | {cost_cell} | {after if after is not None else 'n/a'} | {row['log']} |\n")

@@ -75,14 +75,38 @@ def _from_env() -> dict:
     return out
 
 
-def load(campaign: Path = None, flags: dict = None):
-    """Returns (settings, provenance) where provenance maps a dotted key to the layer that set it."""
+def load(campaign: Path = None, flags: dict = None, facts: dict = None):
+    """Returns (settings, provenance) where provenance maps a dotted key to the layer that set it.
+
+    `facts` (role, repo, unit, diff_lines, …) drive the `rules:` block of any kit.yaml / kit.json
+    on the way through; see kit/config.py for why rules are matchers and not code.
+    """
+    from . import config as C
+    docs = []            # (label, doc) in precedence order, for rule evaluation after merging
     layers = [("default", DEFAULTS)]
+    for label, directory in (("machine", MACHINE.parent), ("repo", Path.cwd())):
+        try:
+            f = C.find(directory)
+        except C.ConfigError as e:
+            raise SystemExit(f"kit: {e}")
+        if f:
+            doc = C.read(f)
+            layers.append((label, doc))
+            docs.append((label, doc))
     if MACHINE.is_file():
         try:
             layers.append(("machine", json.loads(MACHINE.read_text())))
         except ValueError:
             pass
+    if campaign:
+        try:
+            f = C.find(campaign)
+        except C.ConfigError as e:
+            raise SystemExit(f"kit: {e}")
+        if f:
+            doc = C.read(f)
+            layers.append(("campaign", doc))
+            docs.append(("campaign", doc))
     if campaign and (campaign / "config.json").is_file():
         try:
             raw = json.loads((campaign / "config.json").read_text())
@@ -105,6 +129,8 @@ def load(campaign: Path = None, flags: dict = None):
             for k, v in values.items():
                 provenance[f"{section}.{k}"] = name
         settings = _merge(settings, layer)
+    for label, doc in docs:                       # rules last: they are the most specific statement
+        settings = C.apply_rules(settings, doc, facts or {}, provenance, label)
     return settings, provenance
 
 

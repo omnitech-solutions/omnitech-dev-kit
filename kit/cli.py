@@ -5,7 +5,9 @@
     kit next [--row ID] [--campaign DIR] [--dry]   the only verb you need
     kit init <slug> --oracle "..." --subject "..." scaffold a campaign here
     kit ledger add "<behaviour>" [--id ID]         add one observable row
-    kit status                                     ledger, spend, what is waiting on you
+    kit config [explain <section.key>]             resolved settings and which layer set them
+    kit status                                     ledger, cost table, what is waiting on you
+    kit resume                                     clear a watchdog halt, after reading why
     kit accept <row>                               commit + tag (kit next does this for you)
     kit unit <row>                                 execute one packet (kit next does this for you)
     kit gates [--scope selected|full] [--detect]   deterministic gates, no model
@@ -66,6 +68,49 @@ def main(argv):
             return 0
         for r in L.rows(camp):
             print(f"{r['verdict']:8s} {r['id']:8s} {r['behaviour'][:70]}")
+        return 0
+
+    if cmd == "config":
+        from .settings import load as load_settings
+        from .campaign import newest_campaign, repo_root
+        import json as _j
+        repo = repo_root()
+        camp = Path(campaign).resolve() if campaign else (newest_campaign(repo, None) if repo else None)
+        facts = {k: _opt(rest, "--" + k) for k in ("role", "repo", "unit", "model", "harness")
+                 if _opt(rest, "--" + k)}
+        if repo and "repo" not in facts:
+            facts["repo"] = repo.name
+        s, prov = load_settings(camp, facts=facts)
+        if rest[:1] == ["explain"]:
+            key = next((x for x in rest[1:] if not x.startswith("--")), None)
+            if not key or "." not in key:
+                print("usage: kit config explain <section.key>   e.g. caps.run_usd", file=sys.stderr)
+                return 2
+            sec, k = key.split(".", 1)
+            print(f"{key} = {(s.get(sec) or {}).get(k)!r}")
+            print(f"  set by: {prov.get(key, 'default')}")
+            if facts:
+                print(f"  facts:  {', '.join(f'{a}={b}' for a, b in facts.items())}")
+            return 0
+        print(_j.dumps({"settings": s, "provenance": prov, "facts": facts}, indent=2, default=str))
+        return 0
+
+    if cmd == "resume":
+        from .watchdog import halt_file, halted
+        from .campaign import newest_campaign, repo_root
+        repo = repo_root()
+        camp = Path(campaign).resolve() if campaign else (newest_campaign(repo, None) if repo else None)
+        if camp is None:
+            print("no campaign", file=sys.stderr)
+            return 2
+        h = halted(camp)
+        if not h:
+            print("not halted")
+            return 0
+        for r in h.get("reasons", []):
+            print(f"  cleared: {r}")
+        halt_file(camp).unlink()
+        print("resumed. `kit next` will run again.")
         return 0
 
     if cmd == "status":

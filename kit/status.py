@@ -1,36 +1,55 @@
 #!/usr/bin/env python3
-"""status.py - where every campaign is, what it cost, and what is waiting on you."""
-import json, os, re, shutil, subprocess, sys, time
+"""status.py — where every campaign is, what it cost, and what is waiting on you.
+
+This is what to read when you were not here while it ran: the ledger, a cost table per unit against
+its targets, and any watchdog halt with the reason it fired.
+"""
+import json
 from pathlib import Path
 
-KIT = Path(__file__).resolve().parent.parent
-HERE = KIT / "kit"
+from .campaign import die, repo_root, say
 
 
-def say(msg=""):
-    print(msg, flush=True)
+def _rows(campaign: Path):
+    f = campaign / "spend.jsonl"
+    if not f.is_file():
+        return []
+    out = []
+    for line in f.read_text().splitlines():
+        if line.strip():
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                pass
+    return out
 
 
-def die(msg, code=2):
-    print(f"\nkit: {msg}", file=sys.stderr)
-    sys.exit(code)
-
-
-def sh(cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, **kw)
-
-
-def repo_root(start=None):
-    r = sh(["git", "-C", str(start or Path.cwd()), "rev-parse", "--show-toplevel"])
-    return Path(r.stdout.strip()) if r.returncode == 0 else None
-
-
-def slug(text, n=48):
-    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return (s[:n].rstrip("-") or "work")
-
-
-from .campaign import unit_targets, unit_totals
+def cost_table(campaign: Path, rows):
+    """Per unit: runs, dollars, wall time, and whether it beat its targets."""
+    from .settings import load as load_settings
+    targets = load_settings(campaign)[0].get("targets") or {}
+    by = {}
+    for r in rows:
+        u = by.setdefault(r.get("unit", "?"), {"usd": 0.0, "s": 0, "n": 0, "unknown": 0})
+        u["usd"] += float(r.get("cost_usd") or 0)
+        u["s"] += int(r.get("seconds") or 0)
+        u["n"] += 1
+        u["unknown"] += 0 if r.get("cost_known") else 1
+    say("")
+    say("  unit                      runs      cost     time   vs target")
+    total = 0.0
+    for unit, v in sorted(by.items()):
+        total += v["usd"]
+        over = []
+        if targets.get("unit_usd") and v["usd"] > float(targets["unit_usd"]):
+            over.append("usd")
+        if targets.get("unit_minutes") and v["s"] > float(targets["unit_minutes"]) * 60:
+            over.append("time")
+        flag = "OVER (" + ", ".join(over) + ")" if over else "ok"
+        unk = f"   {v['unknown']} unmeasured" if v["unknown"] else ""
+        say(f"  {unit[:24]:24s} {v['n']:5d}  ${v['usd']:7.4f}  {v['s'] // 60:3d}m{v['s'] % 60:02d}s   {flag}{unk}")
+    say(f"  {'TOTAL':24s} {len(rows):5d}  ${total:7.4f}")
+    return total
 
 
 def cmd_status():
@@ -38,27 +57,34 @@ def cmd_status():
     root = repo / ".desoleary" / "kit"
     camps = sorted(root.glob("*/config.json")) if root.is_dir() else []
     if not camps:
-        say("no campaigns yet. Start one with: kit do \"<what you want built>\"")
+        say('no campaigns yet. Start one with: kit init <slug> --oracle "..." --subject "..."')
         return 0
+
+    from . import ledger as L
+    from .watchdog import halted
+    grand = 0.0
     for cfg in camps:
         c = cfg.parent
-        ask = (c / "ASK.md").read_text().splitlines()[-1].strip() if (c / "ASK.md").is_file() else ""
-        say(f"\n{c.name}: {ask[:70]}")
-        from . import ledger as L
+        say(f"\n{c.name}")
+
+        if (h := halted(c)):
+            say(f"  ** HALTED **  {h.get('at', '')}  unit {h.get('unit')}")
+            for reason in h.get("reasons", []):
+                say(f"     {reason}")
+            say("     read the run log, then: kit resume")
+
         rows = L.rows(c)
         if rows:
             done = sum(1 for r in rows if r["verdict"] in ("PASS", "SKIP"))
             say(f"  ledger {done}/{len(rows)} green")
             for r in rows:
                 if r["verdict"] not in ("PASS", "SKIP"):
-                    say(f"    {r['verdict']:8s} {r['id']:8s} {r['behaviour'][:62]}")
-        try:
-            rows = [json.loads(l) for l in (c / "spend.jsonl").read_text().splitlines() if l.strip()]
-        except (OSError, ValueError):
-            rows = []
-        targets = unit_targets(json.loads(cfg.read_text()))
-        for unit, t in sorted(unit_totals(rows).items()):
-            over = [k for k, bad in (("usd", t["usd"] > targets["usd"]),
-                                     ("time", t["seconds"] > targets["minutes"] * 60)) if bad]
-            say(f"  {unit}  ${t['usd']:.2f}  {t['seconds'] // 60}m" + (f" OVER TARGET ({', '.join(over)})" if over else ""))
+                    say(f"    {r['verdict']:8s} {r['id']:8s} {r['behaviour'][:60]}")
+
+        spend = _rows(c)
+        if spend:
+            grand += cost_table(c, spend)
+
+    if len(camps) > 1:
+        say(f"\nall campaigns: ${grand:.4f}")
     return 0
