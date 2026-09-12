@@ -1,0 +1,9 @@
+[project]
+name = "omnitech-dev-kit"
+version = "2.0.0"
+description = "One verified unit at a time, on cheap models, under guardrails."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

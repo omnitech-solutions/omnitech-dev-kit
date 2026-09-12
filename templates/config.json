@@ -1,0 +1,159 @@
+{
+  "harness": "omp",
+  "campaign": "<repo>/<feature>",
+  "run_cap_usd": 0.25,
+  "campaign_cap_usd": 2.0,
+  "campaign_baseline_usd": null,
+  "usage_probe": {
+    "omp": "openrouter",
+    "opencode": "openrouter",
+    "codex": "openrouter",
+    "claude": "harness",
+    "default": "none"
+  },
+  "key_env": "OPENROUTER_API_KEY",
+  "usage_lag_seconds": 12,
+  "models": {
+    "reader": "openrouter/z-ai/glm-5.3-flash",
+    "orchestrator": "openrouter/z-ai/glm-5.3",
+    "implementer": "openrouter/z-ai/glm-5.3-flash",
+    "verifier": "openrouter/z-ai/glm-5.3-flash",
+    "planner": "openrouter/z-ai/glm-5.3"
+  },
+  "roles": {
+    "reader": {
+      "tools": "read,grep,glob",
+      "max_time": "3m",
+      "approval": "always-ask",
+      "thinking": "low",
+      "writes": false,
+      "expected_turns": 6
+    },
+    "orchestrator": {
+      "tools": "read,grep,glob",
+      "max_time": "4m",
+      "approval": "always-ask",
+      "thinking": "low",
+      "writes": false,
+      "expected_turns": 4
+    },
+    "implementer": {
+      "tools": "read,grep,glob,edit,write,bash",
+      "max_time": "12m",
+      "approval": "yolo",
+      "thinking": "medium",
+      "writes": true,
+      "expected_turns": 12
+    },
+    "verifier": {
+      "tools": "read,grep,glob,bash",
+      "max_time": "9m",
+      "approval": "yolo",
+      "thinking": "low",
+      "writes": false,
+      "expected_turns": 10
+    },
+    "planner": {
+      "tools": "read,grep,glob,write",
+      "max_time": "12m",
+      "approval": "yolo",
+      "thinking": "medium",
+      "writes": true,
+      "expected_turns": 10,
+      "_comment": "writes the whiteboarding session into crux's inbox and the plan into the campaign; deliver.py verifies that after the run"
+    }
+  },
+  "harness_env": {
+    "codex": {
+      "KIT_CODEX_PROVIDER": "openrouter",
+      "KIT_CODEX_BASE_URL": "https://openrouter.ai/api/v1",
+      "KIT_CODEX_ENV_KEY": "OPENROUTER_API_KEY"
+    },
+    "opencode": {},
+    "claude": {},
+    "omp": {}
+  },
+  "prompt_budget_fraction": 0.5,
+  "model_context": {
+    "_comment": "declared context window in TOKENS, longest-prefix match ('*' is a prefix wildcard). For a local runtime this must be the LOADED context, not the model's maximum: LM Studio reports loaded_context_length at /api/v0/models, and a just-in-time load uses the default, not the value a previous explicit load used.",
+    "lmstudio/*": 65536,
+    "openrouter/z-ai/glm-5.3-flash": 131072,
+    "openrouter/z-ai/glm-5.3": 131072,
+    "z-ai/*": 131072
+  },
+  "loop_watchdog": {
+    "enabled": true,
+    "poll_seconds": 10,
+    "min_seconds": 45,
+    "repeat_threshold": 8
+  },
+  "allow_unmetered": false,
+  "allow_capability_gap": {
+    "_comment": "per harness, the capability gaps you have decided to accept; each entry is a substring of the refusal message",
+    "codex": [],
+    "opencode": [],
+    "omp": [],
+    "claude": []
+  },
+  "model_prices": {
+    "_comment": "approximate USD per million tokens, for the PRE-LAUNCH projection only; not a quote. Update when a provider changes pricing.",
+    "claude-haiku-4-5*": {
+      "in_per_mtok": 1.0,
+      "out_per_mtok": 5.0
+    },
+    "claude-sonnet-5*": {
+      "in_per_mtok": 3.0,
+      "out_per_mtok": 15.0
+    },
+    "openrouter/z-ai/glm-5.3-flash": {
+      "in_per_mtok": 0.1,
+      "out_per_mtok": 0.4
+    },
+    "z-ai/glm-5.3-flash": {
+      "in_per_mtok": 0.1,
+      "out_per_mtok": 0.4
+    },
+    "openrouter/z-ai/glm-5.3": {
+      "in_per_mtok": 0.4,
+      "out_per_mtok": 1.6
+    },
+    "z-ai/glm-5.3": {
+      "in_per_mtok": 0.4,
+      "out_per_mtok": 1.6
+    },
+    "lmstudio/*": {
+      "in_per_mtok": 0.0,
+      "out_per_mtok": 0.0
+    }
+  },
+  "usage_probe_backoff": [
+    12,
+    20,
+    45
+  ],
+  "allowed_model_prefixes": [
+    "openrouter/",
+    "z-ai/",
+    "claude-"
+  ],
+  "allow_local_models": false,
+  "worktree": {
+    "_comment": "what a fresh task worktree gets from the main checkout: link heavy+safe dirs, copy small per-tree files, never expose live data",
+    "link": [
+      "**/node_modules",
+      ".claude"
+    ],
+    "copy": [
+      ".env",
+      ".env.local",
+      "*/.env",
+      "*/.env.local"
+    ],
+    "never": [
+      "**/.local-runtime",
+      ".local-runtime",
+      "**/*.sqlite",
+      "**/*.db"
+    ]
+  }
+}

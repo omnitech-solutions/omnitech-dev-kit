@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# The kit's only entry point. Resolves the package and hands argv straight to the dispatcher.
+set -euo pipefail
+KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export KIT_PLUGIN_ROOT="$KIT_ROOT"
+exec python3 -c "import sys; sys.path.insert(0, sys.argv.pop(1)); from kit.cli import main; sys.exit(main(sys.argv[1:]))" "$KIT_ROOT" "$@"
